@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pycubiio"
+version = "0.1.0"
+description = "Control the original Cubiio laser engraver (1st gen, 2017) over Bluetooth LE"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "bleak>=0.22",
+    "QPUIQ>=1.11",
+    "PySide6-Essentials>=6.6",
+]
+
+[project.scripts]
+pycubiio = "pycubiio.ui:main"
+
+[tool.setuptools]
+packages = ["pycubiio"]

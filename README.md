@@ -2,6 +2,46 @@
 
 Tools and notes for the original Cubiio laser engraver (1st gen, 2017, by Muherz, Bluetooth model).
 
+## Install
+
+Requires Python 3.10+.
+
+```bash
+python3 -m venv env
+```
+
+```bash
+env/bin/pip install -e .
+```
+
+Dependencies: `bleak` (BLE), `QPUIQ` (PUI) and `PySide6-Essentials` (GUI backend).
+
+## Usage
+
+Switch the Cubiio on first: long-press the power button until the indicator turns white. Bluetooth alone is not enough; the main board stays off until then. Do not pair it in the OS Bluetooth settings, and disconnect the phone app (the BLE module accepts one connection).
+
+```bash
+env/bin/pycubiio
+```
+
+The window scans for Cubiios. Pick one and click Connect, then choose a file from the SD card, enter the 6-digit password, set power/speed and click Preview or Engrave.
+
+On macOS the terminal app running this needs Bluetooth permission (System Settings → Privacy & Security → Bluetooth); without it the process is killed on the first scan.
+
+The library can also be used directly:
+
+```python
+import asyncio
+from pycubiio import Cubiio, scan
+
+async def main():
+    found = await scan()
+    async with await Cubiio.connect(found[0].device) as cub:
+        print(await cub.firmware(), await cub.list_files())
+
+asyncio.run(main())
+```
+
 ## Hardware
 
 - MCU: ATmega2560 with the Arduino stk500v2 bootloader (USB ID `2341:0042`, Arduino Mega 2560)

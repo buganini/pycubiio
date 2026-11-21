@@ -1,2 +1,5 @@
 # Proprietary vendor files (fetch with scripts/fetch_vendor.sh)
 /vendor/
+/env/
+*.egg-info/
+__pycache__/
