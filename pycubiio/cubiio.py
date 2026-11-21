@@ -15,14 +15,13 @@ from dataclasses import dataclass
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
 
+from .errors import CubiioError
+
 SERVICE_UUID = "0000ffe0-0000-1000-8000-00805f9b34fb"
 CHAR_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb"
 CHUNK = 20
-CHUNK_DELAY = 0.01
-
-
-class CubiioError(Exception):
-    pass
+CHUNK_DELAY = 0.005  # app uses 7 ms; uploads are UART-bound at ~1.9 KB/s below this
+FILE_SLICE = 1500  # app: FILE_SLICE_SIZE
 
 
 @dataclass(frozen=True)
@@ -159,16 +158,61 @@ class Cubiio:
             await self.client.write_gatt_char(CHAR_UUID, data[i : i + CHUNK], response=False)
             await asyncio.sleep(CHUNK_DELAY)
 
+    async def _readline(self, what: str, timeout: float) -> str:
+        try:
+            return await asyncio.wait_for(self._lines.get(), timeout)
+        except asyncio.TimeoutError:
+            raise CubiioError(f"no response to {what} (is the Cubiio switched on?)") from None
+
+    def _drain(self) -> None:
+        while not self._lines.empty():  # drop stale lines
+            self._lines.get_nowait()
+
     async def command(self, cmd: str, timeout: float = 5.0) -> str:
         """Send one command and return its one-line response."""
         async with self._lock:
-            while not self._lines.empty():  # drop stale lines
-                self._lines.get_nowait()
+            self._drain()
             await self._write(cmd.encode() + b"\n")
-            try:
-                return await asyncio.wait_for(self._lines.get(), timeout)
-            except asyncio.TimeoutError:
-                raise CubiioError(f"no response to {cmd!r} (is the Cubiio switched on?)") from None
+            return await self._readline(repr(cmd), timeout)
+
+    async def upload(self, name: str, data: bytes, progress=None, retries: int = 5) -> None:
+        """Write a file to the SD card (the app uses 8.3 names such as "LOGO.bmp").
+
+        Protocol: "_TF=<name>:<size>" -> "TF_READY"; then 1500-byte slices, each
+        acknowledged with the number of bytes received (resent on mismatch);
+        finally "ok". `progress(sent, total)` is called after each slice.
+        """
+        async with self._lock:
+            self._drain()
+            await self._write(f"_TF={name}:{len(data)}\n".encode())
+            resp = await self._readline("_TF", 10.0)
+            if resp != "TF_READY":
+                raise CubiioError(f"upload of {name!r} refused: {resp!r}")
+            delay = CHUNK_DELAY
+            sent = 0
+            while sent < len(data):
+                piece = data[sent : sent + FILE_SLICE]
+                for attempt in range(retries + 1):
+                    await self._write_paced(piece, delay)
+                    resp = await self._readline("file slice", 15.0)
+                    if resp == str(len(piece)):
+                        break
+                    if "error" in resp or "warning" in resp:
+                        raise CubiioError(f"upload failed at byte {sent}: {resp!r}")
+                    delay += 0.001  # same back-off as the app
+                else:
+                    raise CubiioError(f"upload failed at byte {sent}: slice not acknowledged")
+                sent += len(piece)
+                if progress:
+                    progress(sent, len(data))
+            resp = await self._readline("end of upload", 15.0)
+            if resp != "ok":
+                raise CubiioError(f"upload of {name!r} not confirmed: {resp!r}")
+
+    async def _write_paced(self, data: bytes, delay: float) -> None:
+        for i in range(0, len(data), CHUNK):
+            await self.client.write_gatt_char(CHAR_UUID, data[i : i + CHUNK], response=False)
+            await asyncio.sleep(delay)
 
     async def _ok(self, cmd: str) -> None:
         resp = await self.command(cmd)

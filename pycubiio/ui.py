@@ -35,7 +35,7 @@ class CubiioApp(Application):
         s.files = []
         s.selected = ""
         s.password = ""
-        s.power = "100"
+        s.power = "75"
         s.speed = "100"
         s.job = ""  # "", "preview", "engrave"
         s.progress = 0.0
