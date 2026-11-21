@@ -32,8 +32,16 @@ The Cubiio only engraves files on its SD card; there is no streaming mode. `send
 - Work area 100 × 100 mm at 10 px/mm (254 dpi): a label `40x30` needs a 400 × 300 px image; the maximum is `100x100` (1000 × 1000 px).
 - Pages are 8-bit grayscale, the same BMP the official app uploads. `--threshold` or `--dither` reduce them to black and white first.
 - Upload speed is about 1.9 KB/s (the BLE MTU is fixed at 23 and the HM-10 → MCU UART is the limit): 40 × 30 mm ≈ 120 KB ≈ 1 min; 100 × 100 mm ≈ 1 MB ≈ 9 min.
-- `--power` (default 75 %) and `--speed` (default 100 %) use the official app's conversion; lower speed engraves deeper. 30 % power left no visible mark in testing.
-- Every job needs the Cubiio's 6-digit unlock code (`--password` / `PYCUBIIO_PASSWORD`).
+- Power (default 75 %) and speed (default 100 %) use the official app's conversion; lower speed engraves deeper. 30 % power left no visible mark in testing.
+- Every job needs the Cubiio's 6-digit unlock code. It is only the machine's safety step, not a secret.
+
+## Printer identifier
+
+```
+ble://<device-id-or-name>[?password=123456&power=75&speed=100]
+```
+
+The device id comes from `discover`; the advertised name (`cubiio_0535`) also works. The optional query sets the unlock code and default power/speed, so brother_ql-style callers such as labelate can drive the Cubiio through `printer_identifier` alone. Precedence for power/speed: the job (`convert(power=...)`, `--power`), then `Printer(power=...)` / `send(power=...)`, then the identifier, then 75 % / 100 %. An explicit `password=` / `--password` overrides `?password=`. Unknown or out-of-range options are errors.
 
 ## CLI
 
@@ -42,15 +50,16 @@ The Cubiio only engraves files on its SD card; there is no streaming mode. `send
 pycubiio discover
 
 # Engrave an image (400 x 300 px for a 40 x 30 mm area)
-pycubiio -p 'ble://<device-id>' --password 123456 print -l 40x30 label.png
+pycubiio -p 'ble://<device-id>?password=123456' print -l 40x30 label.png
+pycubiio -p 'ble://<device-id>' --password 123456 print -l 40x30 --power 90 --speed 80 label.png
 
 # Trace the outline at low power without engraving
-pycubiio -p 'ble://<device-id>' --password 123456 preview -l 40x30 label.png
+pycubiio -p 'ble://<device-id>?password=123456' preview -l 40x30 label.png
 
 # Convert offline, inspect, then send
 pycubiio convert -l 40x30 label.png -o label.cubiio
 pycubiio analyze label.cubiio --output-dir previews
-pycubiio -p 'ble://<device-id>' --password 123456 send label.cubiio
+pycubiio -p 'ble://<device-id>?password=123456&power=75' send label.cubiio
 
 # Device helpers
 pycubiio -p 'ble://<device-id>' status
@@ -67,7 +76,7 @@ pycubiio info labels
 ```python
 from pycubiio import Printer
 
-with Printer("ble://<device-id>", password="123456") as printer:
+with Printer("ble://<device-id>?password=123456") as printer:
     result = printer.print_image("label.png", label="40x30", power=75, speed=100)
 ```
 
@@ -81,18 +90,17 @@ from pycubiio.backends.helpers import discover, send
 devices = discover(backend_identifier="bleak")
 
 raster = CubiioRaster("cubiio")
-instructions = convert(raster, images=["label.png"], label="40x30", power=75, speed=100)
+instructions = convert(raster, images=["label.png"], label="40x30")
 
 result = send(
     instructions,
-    printer_identifier=devices[0]["identifier"],
+    printer_identifier="ble://<device-id>?password=123456&power=75&speed=100",
     backend_identifier="bleak",
     blocking=True,
-    password="123456",
 )
 ```
 
-`convert()` returns an `EngraveJob`, not raw bytes. `label=None` engraves the image at its own size. `send()` returns brother_ql's result fields plus `pages_printed`:
+`convert()` returns an `EngraveJob`, not raw bytes; its power/speed stay `None` unless given, so the identifier decides. `label=None` engraves the image at its own size. `send()` returns brother_ql's result fields plus `pages_printed`:
 
 | Field | Meaning |
 | --- | --- |

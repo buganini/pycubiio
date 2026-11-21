@@ -14,8 +14,8 @@ def convert(
     rotate="auto",
     threshold=None,
     dither=False,
-    power=75.0,
-    speed=100.0,
+    power=None,
+    speed=None,
 ):
     """Convert images without device I/O.
 
@@ -24,6 +24,8 @@ def convert(
     image at its own pixel size (10 px = 1 mm).
     The Cubiio engraves grayscale; threshold (0-100, brother_ql semantics) or dither
     reduce it to black and white first.
+    power/speed (percent) left as None are decided at send time: the printer
+    identifier's ?power=/?speed=, else 75 % / 100 %.
     """
     model = raster.model_obj
     if threshold is not None and (not math.isfinite(threshold) or not 0 <= threshold <= 100):
@@ -63,8 +65,8 @@ def convert(
         if pages
         else "",
         tuple(pages),
-        float(power),
-        float(speed),
+        None if power is None else float(power),
+        None if speed is None else float(speed),
     )
     job.validate()
     raster.job = job

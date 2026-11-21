@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 
 from pycubiio import AsyncPrinter, Cubiio, EngraveJob, PrintError
+from pycubiio.backends.bleak import parse_identifier
 from pycubiio.conversion import convert
 from pycubiio.cubiio import CHAR_UUID, FILE_SLICE, Status
 from pycubiio.job import FILE_NAME, decode_bmp, encode_bmp
@@ -41,7 +42,7 @@ def test_bmp_matches_app_layout():
 def test_convert_label_exact_size_and_rotate():
     raster = CubiioRaster()
     job = convert(raster, [gradient(400, 300)], "40x30")
-    assert job.pages[0].width == 400 and job.power == 75.0 and job.speed == 100.0
+    assert job.pages[0].width == 400 and job.power is None and job.speed is None
     job = convert(raster, [gradient(300, 400)], "40x30")  # auto-rotated
     assert (job.pages[0].width, job.pages[0].height) == (400, 300)
     with pytest.raises(ValueError, match="requires"):
@@ -238,3 +239,49 @@ def test_send_reports_abort():
     with pytest.raises(PrintError) as info:
         run(go())
     assert info.value.result["outcome"] == "error" and info.value.result["pages_printed"] == 0
+
+
+# ---- printer identifier options ----------------------------------------------
+
+
+def test_parse_identifier():
+    assert parse_identifier("ble://ABC") == ("ABC", {})
+    assert parse_identifier("cubiio_0535?password=123456&power=75&speed=100") == (
+        "cubiio_0535",
+        {"password": "123456", "power": 75.0, "speed": 100.0},
+    )
+    for bad in ("ble://x?pwoer=1", "ble://x?power=101", "ble://x?speed=fast", "ble://x?password="):
+        with pytest.raises(ValueError):
+            parse_identifier(bad)
+
+
+def test_precedence_job_over_explicit_over_identifier_over_default():
+    job = convert(CubiioRaster(), [gradient(4, 4)])  # power/speed unset
+    url = "ble://x?password=111111&power=40&speed=60"
+    assert AsyncPrinter("ble://x").settings(job) == (75.0, 100.0)
+    assert AsyncPrinter(url).settings(job) == (40.0, 60.0)
+    assert AsyncPrinter(url, power=90).settings(job) == (90.0, 60.0)
+    set_job = convert(CubiioRaster(), [gradient(4, 4)], power=20, speed=30)
+    assert AsyncPrinter(url, power=90).settings(set_job) == (20.0, 30.0)
+    assert AsyncPrinter(url).password == "111111"
+    assert AsyncPrinter(url, password="222222").password == "222222"
+
+
+def test_password_from_identifier_reaches_device():
+    client, cub = make_device()
+    job = convert(CubiioRaster(), [gradient(4, 4)])
+
+    async def go():
+        async with AsyncPrinter("ble://x?password=654321&power=100", device=cub) as printer:
+            return await printer.send(job)
+
+    assert run(go())["outcome"] == "printed"
+    assert "CPW654321" in client.log and "_P6=20.0" in client.log and "_P4=0.0" in client.log
+
+
+def test_missing_password_fails_before_connecting():
+    from pycubiio.backends.helpers import send
+
+    job = convert(CubiioRaster(), [gradient(4, 4)])
+    with pytest.raises(ValueError, match="unlock code"):
+        send(job, "ble://nonexistent", "bleak")

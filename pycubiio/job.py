@@ -9,6 +9,8 @@ from pathlib import Path
 from .models import ModelsManager
 
 MAX_JOB_BYTES = 64 * 1024 * 1024
+DEFAULT_POWER = 75.0
+DEFAULT_SPEED = 100.0
 FILE_NAME = "pycubiio.bmp"  # every page is uploaded to this SD card file, then engraved
 
 
@@ -72,14 +74,18 @@ class EngraveJob:
     model: str
     label: str
     pages: tuple
-    power: float = 75.0  # percent
-    speed: float = 100.0  # percent
+    # Percent. None = not set by the job: send() then uses the printer identifier's
+    # ?power=/?speed= or DEFAULT_POWER / DEFAULT_SPEED.
+    power: float | None = None
+    speed: float | None = None
 
     def validate(self):
         model = ModelsManager().get_model_by_identifier(self.model)
         for field in ("power", "speed"):
             value = getattr(self, field)
-            if not isinstance(value, (int, float)) or not 0 <= value <= 100:
+            if value is not None and (
+                not isinstance(value, (int, float)) or not 0 <= value <= 100
+            ):
                 raise ValueError(f"{field.capitalize()} must be between 0 and 100 %")
         if not self.pages:
             raise ValueError("Job must contain at least one page")

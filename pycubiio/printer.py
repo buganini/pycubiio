@@ -1,10 +1,10 @@
 import asyncio
 import logging
 
-from .backends.bleak import open_device
+from .backends.bleak import open_device, parse_identifier
 from .conversion import convert
 from .errors import CubiioError, PrintError
-from .job import FILE_NAME, EngraveJob
+from .job import DEFAULT_POWER, DEFAULT_SPEED, FILE_NAME, EngraveJob
 from .models import ModelsManager
 from .raster import CubiioRaster
 
@@ -47,16 +47,33 @@ def find_path(files, name):
 
 
 class AsyncPrinter:
-    def __init__(self, identifier, model="cubiio", *, password, timeout=3600.0, device=None):
-        """password: the Cubiio's 6-digit unlock code (required before any laser output).
+    def __init__(
+        self,
+        identifier,
+        model="cubiio",
+        *,
+        password=None,
+        power=None,
+        speed=None,
+        timeout=3600.0,
+        device=None,
+    ):
+        """identifier: ble://<device-id-or-name>[?password=...&power=...&speed=...]
+        password: the Cubiio's 6-digit unlock code (needed before any laser output).
+        power/speed: session defaults in percent for jobs that do not set them.
+        Explicit arguments override the identifier's query options.
         timeout: maximum seconds to wait for one page to finish engraving."""
         if timeout <= 0:
             raise ValueError("Timeout must be positive")
-        if not password:
-            raise ValueError("password is required")
+        _, options = parse_identifier(identifier)
+        for key, value in (("power", power), ("speed", speed)):
+            if value is not None and not 0 <= value <= 100:
+                raise ValueError(f"{key} must be between 0 and 100 %")
         self.model = ModelsManager().get_model_by_identifier(model)
         self.identifier = identifier
-        self.password = str(password)
+        self.password = str(password) if password else options.get("password")
+        self.power = options.get("power", DEFAULT_POWER) if power is None else float(power)
+        self.speed = options.get("speed", DEFAULT_SPEED) if speed is None else float(speed)
         self.timeout = timeout
         self.device = device  # an already-connected pycubiio.Cubiio, for tests or reuse
         self.owns_device = device is None
@@ -102,12 +119,27 @@ class AsyncPrinter:
         await self.device.upload(FILE_NAME, data, progress)
         return find_path(await self.device.list_files(), FILE_NAME)
 
+    def _require_password(self):
+        if not self.password:
+            raise ValueError(
+                "The Cubiio needs its 6-digit unlock code: pass password=... "
+                "or use ble://<id>?password=..."
+            )
+        return self.password
+
+    def settings(self, job):
+        """Effective (power, speed): job value, else session/identifier value, else default."""
+        power = self.power if job.power is None else job.power
+        speed = self.speed if job.speed is None else job.speed
+        return power, speed
+
     async def preview(self, job, progress=None):
         """Upload the first page and trace its outline at low power."""
         job.validate()
+        password = self._require_password()
         async with self.lock:
             path = await self._upload(job.pages[0], progress)
-            await self.device.preview(path, self.password)
+            await self.device.preview(path, password)
             await self._wait()
 
     async def send(self, instructions, *, blocking=True, progress=None):
@@ -117,6 +149,9 @@ class AsyncPrinter:
         if not isinstance(instructions, EngraveJob):
             raise TypeError("instructions must be an EngraveJob from pycubiio.conversion.convert")
         instructions.validate()
+        password = self._require_password()
+        power, speed = self.settings(instructions)
+        logger.debug("engraving %d page(s) at power %g%%, speed %g%%", len(instructions.pages), power, speed)
         result = new_result()
         pages = instructions.pages
         try:
@@ -131,9 +166,7 @@ class AsyncPrinter:
                     if index == len(pages) - 1:
                         result["instructions_sent"] = True
                     result["outcome"] = "sent"
-                    await self.device.engrave(
-                        path, self.password, instructions.power, instructions.speed
-                    )
+                    await self.device.engrave(path, password, power, speed)
                     st = await self._wait(
                         (lambda p: progress("engrave", index * 100 + p, len(pages) * 100))
                         if progress

@@ -75,8 +75,7 @@ def printer_id(ctx):
 
 
 def password(ctx):
-    if not ctx.obj["password"]:
-        raise click.UsageError("Specify --password or PYCUBIIO_PASSWORD")
+    """--password / PYCUBIIO_PASSWORD, else None (then ?password= in --printer is used)."""
     return ctx.obj["password"]
 
 
@@ -97,7 +96,12 @@ def progress_printer():
     "-b", "--backend", type=click.Choice(["bleak"]), default="bleak", envvar="PYCUBIIO_BACKEND"
 )
 @click.option("-m", "--model", default="cubiio", envvar="PYCUBIIO_MODEL")
-@click.option("-p", "--printer", envvar="PYCUBIIO_PRINTER", help="ble://<device-id> or name")
+@click.option(
+    "-p",
+    "--printer",
+    envvar="PYCUBIIO_PRINTER",
+    help="ble://<device-id-or-name>[?password=...&power=...&speed=...]",
+)
 @click.option("--password", envvar="PYCUBIIO_PASSWORD", help="6-digit unlock code")
 @click.option("--debug", is_flag=True, help="Log BLE TX/RX")
 @click.version_option(__version__)
@@ -181,8 +185,8 @@ def image_options(function):
             "-t", "--threshold", type=click.FloatRange(0, 100), help="Black/white cutoff"
         ),
         click.option("-d", "--dither", is_flag=True),
-        click.option("--power", type=click.FloatRange(0, 100), default=75.0, show_default=True),
-        click.option("--speed", type=click.FloatRange(0, 100), default=100.0, show_default=True),
+        click.option("--power", type=click.FloatRange(0, 100), help="Percent; default ?power= or 75"),
+        click.option("--speed", type=click.FloatRange(0, 100), help="Percent; default ?speed= or 100"),
     ]
     for decorator in reversed(decorators):
         function = decorator(function)
@@ -296,7 +300,7 @@ def analyze(instructions, output_dir, as_json):
 @checked
 def status(ctx, as_json):
     """Firmware, state and temperature."""
-    with Printer(printer_id(ctx), ctx.obj["model"], password="-") as printer:
+    with Printer(printer_id(ctx), ctx.obj["model"], password=password(ctx)) as printer:
         emit(printer.status(), as_json)
 
 

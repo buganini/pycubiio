@@ -39,7 +39,9 @@ async def send_async(
     backend_identifier=None,
     blocking=True,
     *,
-    password,
+    password=None,
+    power=None,
+    speed=None,
     timeout=3600.0,
     progress=None,
 ):
@@ -48,9 +50,16 @@ async def send_async(
     instructions.validate()
     if not printer_identifier:
         raise ValueError("printer_identifier is required")
-    async with AsyncPrinter(
-        printer_identifier, instructions.model, password=password, timeout=timeout
-    ) as printer:
+    printer = AsyncPrinter(
+        printer_identifier,
+        instructions.model,
+        password=password,
+        power=power,
+        speed=speed,
+        timeout=timeout,
+    )
+    printer._require_password()  # fail before connecting
+    async with printer:
         return await printer.send(instructions, progress=progress)
 
 
@@ -60,7 +69,9 @@ def send(
     backend_identifier=None,
     blocking=True,
     *,
-    password,
+    password=None,
+    power=None,
+    speed=None,
     timeout=3600.0,
     progress=None,
 ):
@@ -72,6 +83,8 @@ def send(
             backend_identifier,
             blocking,
             password=password,
+            power=power,
+            speed=speed,
             timeout=timeout,
             progress=progress,
         )
