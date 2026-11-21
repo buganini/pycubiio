@@ -4,6 +4,26 @@ A Python library, CLI and GUI for the original Cubiio laser engraver (1st gen, 2
 
 **The API and CLI follow [pklaus/brother_ql](https://github.com/pklaus/brother_ql)**, by way of [buganini/pyniim](https://github.com/buganini/pyniim): `CubiioRaster`, `convert()`, `backends.helpers.discover()` / `send()` and the `discover` / `info` / `print` / `convert` / `send` / `analyze` commands work the same way, adapted to engraving.
 
+## Use with Labelate
+
+[Labelate](https://github.com/buganini/labelate) is a label template editor (text, images, QR and Code 128 barcodes,
+variables imported from a spreadsheet) with a web app and a desktop app. The desktop
+app prints through pycubiio: install it from a Labelate checkout with
+`python -m pip install -e '.[cubiio]'` (or `.[printers]` for every supported
+printer), then choose **Cubiio** under Output and scan for devices.
+
+How Labelate uses pycubiio:
+
+- Choosing Cubiio sets the label to 254 DPI (10 px/mm); labels may be up to
+  100 × 100 mm.
+- **Printer settings** ask for power and speed (percent) and the unlock code, shown
+  masked. Labelate checks them before anything is sent.
+- The label is converted with `conversion.convert(CubiioRaster(model), [image],
+  "WIDTHxHEIGHT", rotate=0, dither=..., power=..., speed=...)` and sent with
+  `send(..., blocking=True, password=..., progress=...)`; upload and engraving
+  progress appear in Labelate's message bar.
+- Each copy is uploaded again (about 2 KB/s), so several copies take a while.
+
 ## Install
 
 Requires Python 3.11+.
@@ -41,7 +61,7 @@ The Cubiio only engraves files on its SD card; there is no streaming mode. `send
 ble://<device-id-or-name>[?password=123456&power=75&speed=100]
 ```
 
-The device id comes from `discover`; the advertised name (`cubiio_0535`) also works. The optional query sets the unlock code and default power/speed, so brother_ql-style callers such as labelate can drive the Cubiio through `printer_identifier` alone. Precedence for power/speed: the job (`convert(power=...)`, `--power`), then `Printer(power=...)` / `send(power=...)`, then the identifier, then 75 % / 100 %. An explicit `password=` / `--password` overrides `?password=`. Unknown or out-of-range options are errors.
+The device id comes from `discover`; the advertised name (`cubiio_0535`) also works. The optional query sets the unlock code and default power/speed, so brother_ql-style callers can drive the Cubiio through `printer_identifier` alone. Precedence for power/speed: the job (`convert(power=...)`, `--power`), then `Printer(power=...)` / `send(power=...)`, then the identifier, then 75 % / 100 %. An explicit `password=` / `--password` overrides `?password=`. Unknown or out-of-range options are errors.
 
 ## CLI
 
@@ -238,4 +258,4 @@ avrdude verifies the flash automatically afterwards; `verified` means success.
 
 ## License
 
-The vendor files are copyright Muherz. Code and documentation in this repo are the author's own work.
+MIT; see [LICENSE](LICENSE). The vendor files (not included, see [Vendor files](#vendor-files)) are copyright Muherz.
